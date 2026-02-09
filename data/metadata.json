@@ -1,0 +1,21 @@
+{
+  "last_updated": "2026-02-08T22:33:30.390266",
+  "panel_start": "1994-04-01T00:00:00",
+  "countries": [
+    "USA",
+    "ZAR",
+    "JPY",
+    "CNY",
+    "GBP",
+    "MXN",
+    "AUD",
+    "CAD",
+    "INR"
+  ],
+  "files": {
+    "macro_data": "fred_macro_data.csv",
+    "reer_historical": "reer_historical.csv",
+    "panel_data": "panel_data.csv",
+    "acm_decomposition": "acm_decomposition.csv"
+  }
+}
