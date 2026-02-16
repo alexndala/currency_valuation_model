@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import pandas_datareader.data as web
 import matplotlib.pyplot as plt
+from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
 import squarify
 import statsmodels.api as sm
 from statsmodels.stats.diagnostic import recursive_olsresiduals
@@ -209,6 +210,9 @@ BREAK_DETECTION_CONFIG = {
 EM_BREAK_PENALTY = {
     'ZAR': 10, 'MXN': 15, 'INR': 15, 'CNY': 15,
 }
+
+# LTCMA Tree Chart: which country to display in the branching decomposition
+LTCMA_TREE_COUNTRY = 'ZAR'
 
 # ============================================================================
 # STRUCTURAL BREAK DETECTION FUNCTIONS
@@ -1136,6 +1140,85 @@ add_footnote(fig8)
 plt.tight_layout()
 plt.subplots_adjust(bottom=0.15)
 plt.show()
+
+# Plot 8b: LTCMA Yield Decomposition Tree (Branching Diagram)
+tree_row = df_final[df_final['Country'] == LTCMA_TREE_COUNTRY]
+if not tree_row.empty and not np.isnan(tree_row.iloc[0]['Bond_10Y']):
+    tr = tree_row.iloc[0]
+    nominal_10y = tr['Bond_10Y']
+    r_star = tr['R_Star']
+    cb_target = tr['CB_Inflation_Target']
+    irp = tr['IRP'] if not np.isnan(tr['IRP']) else 0.0
+    term_prem = tr['LTCMA_Residual'] if not np.isnan(tr['LTCMA_Residual']) else 0.0
+    real_yield = r_star + term_prem
+    inflation_comp = cb_target + irp
+
+    fig8b, ax8b = plt.subplots(figsize=(14, 7))
+    ax8b.set_xlim(0, 10)
+    ax8b.set_ylim(0, 10)
+    ax8b.axis('off')
+
+    # Node layout: (cx, cy, width, height)
+    node_w, node_h = 2.2, 1.1
+    nodes = {
+        'root':      (1.3, 5.0),
+        'real':      (5.0, 7.3),
+        'infl':      (5.0, 2.7),
+        'rstar':     (8.7, 8.5),
+        'termprem':  (8.7, 6.1),
+        'cbtarget':  (8.7, 3.9),
+        'irp':       (8.7, 1.5),
+    }
+
+    node_info = {
+        'root':     ('10Y Nominal',      nominal_10y,    COLORS['primary']),
+        'real':     ('Real Yield',        real_yield,     COLORS['secondary']),
+        'infl':     ('Inflation Comp.',   inflation_comp, COLORS['accent']),
+        'rstar':    ('r* (Real Cash)',    r_star,         COLORS['real_rate']),
+        'termprem': ('Term Premium',      term_prem,      COLORS['term_premium']),
+        'cbtarget': ('CB Infl. Target',   cb_target,      COLORS['inflation']),
+        'irp':      ('Infl. Risk Prem.',  irp,            COLORS['currency_risk']),
+    }
+
+    edges = [
+        ('root', 'real'), ('root', 'infl'),
+        ('real', 'rstar'), ('real', 'termprem'),
+        ('infl', 'cbtarget'), ('infl', 'irp'),
+    ]
+
+    # Draw edges first (behind nodes)
+    for parent, child in edges:
+        px, py = nodes[parent]
+        cx, cy = nodes[child]
+        ax8b.annotate('',
+            xy=(cx - node_w / 2, cy), xytext=(px + node_w / 2, py),
+            arrowprops=dict(arrowstyle='->', color='#888888', lw=1.8,
+                            connectionstyle='arc3,rad=0.0'))
+
+    # Draw nodes
+    for key, (cx, cy) in nodes.items():
+        label, value, color = node_info[key]
+        box = FancyBboxPatch((cx - node_w / 2, cy - node_h / 2), node_w, node_h,
+                             boxstyle='round,pad=0.15', facecolor=color,
+                             edgecolor='white', linewidth=2)
+        ax8b.add_patch(box)
+        ax8b.text(cx, cy + 0.15, label, ha='center', va='center',
+                  fontsize=11, fontweight='bold', color='white')
+        ax8b.text(cx, cy - 0.25, f'{value:+.2f}%', ha='center', va='center',
+                  fontsize=13, fontweight='bold', color='white')
+
+    ax8b.set_title(f'LTCMA 10Y Yield Decomposition Tree — {LTCMA_TREE_COUNTRY}',
+                   fontsize=14, fontweight='bold', pad=15)
+
+    # Equation footnote
+    fig8b.text(0.5, 0.04,
+        f'10Y Nominal ({nominal_10y:.2f}%) = r* ({r_star:.2f}%) + CB Target ({cb_target:.2f}%) '
+        f'+ IRP ({irp:+.2f}%) + Term Premium ({term_prem:+.2f}%)',
+        ha='center', fontsize=10, style='italic', color='#555555')
+    add_footnote(fig8b, y_pos=0.01)
+    plt.tight_layout()
+    plt.subplots_adjust(bottom=0.12)
+    plt.show()
 
 # Plot 9: Fair Value REER Model - Actual vs Model-Implied
 if fair_value_df is not None and pooled_model_results is not None:

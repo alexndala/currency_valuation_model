@@ -14,6 +14,13 @@ In January 2022, the yen underwent a structural break—a statistically signific
 
 When I apply Bai-Perron structural break detection to the data, the post-2022 regime mean is **74**—not 88. Suddenly, the yen isn't 22% undervalued. It's closer to 7% cheap, and much of that gap is explained by carry differentials, not mispricing.
 
+And the yen isn't an isolated case. When you plot each currency's REER as a percentage differential against the dollar, the divergence across the board is striking. As of December 2025, JPY trades **36% below** USD in real effective terms—the widest gap in the dataset. CNY sits **17% below**, INR **13% below**, and CAD **10% below**. On the other side, MXN trades **24% above** USD, while ZAR, AUD, and GBP cluster within a few percentage points of the dollar baseline.
+
+[Flourish: REER Differentials vs USD (%)]
+*Chart: Percentage REER differential vs USD over time — (REER(ccy) − REER(USD)) / REER(USD). Positive values indicate a currency trading above USD in real terms; negative values below.*
+
+The chart makes one thing immediately visible: these gaps aren't stable. They widen, narrow, and sometimes invert entirely—suggesting the "equilibrium" everyone benchmarks against is itself a moving target.
+
 **What if your valuation anchor is from a regime that no longer exists?**
 
 This question should haunt every currency investor using simple historical averages as fair value benchmarks.
