@@ -166,6 +166,11 @@ EM_KICKERS = {
     'MXN': 0.5,  # Mexico: moderate EM premium
 }
 
+# Mean Reversion Configuration
+REVERSION_MODE = 'half_life'   # 'half_life' or 'linear'
+REVERSION_HALF_LIFE = 5        # years (only used when mode='half_life'); Rogoff (1996) standard
+REVERSION_HORIZON = 10         # investment horizon in years
+
 # ============================================================================
 # LTCMA BUILDING BLOCKS (JP Morgan Style)
 # ============================================================================
@@ -211,8 +216,9 @@ EM_BREAK_PENALTY = {
     'ZAR': 10, 'MXN': 15, 'INR': 15, 'CNY': 15,
 }
 
-# LTCMA Tree Chart: which country to display in the branching decomposition
+# Tree Charts: which country to display in branching decompositions
 LTCMA_TREE_COUNTRY = 'ZAR'
+RETURNS_TREE_COUNTRY = 'ZAR'
 
 # ============================================================================
 # STRUCTURAL BREAK DETECTION FUNCTIONS
@@ -751,11 +757,20 @@ df_final['Real_Yield_10Y'] = df_final['Bond_10Y'] - df_final['BEI']
 usd_real_yield_10y = usd_bond_10y - usd_bei
 df_final['Real_Carry_Annual'] = df_final['Real_Yield_10Y'] - usd_real_yield_10y
 
-# Component 2: Valuation / Currency Drag (non-parametric, 100% reversion over 10Y)
+# Component 2: Valuation / Currency Drag (mean reversion toward fair value)
 # Positive gap = undervalued = expected appreciation
 # Negative gap = overvalued = expected depreciation
 df_final['Valuation_Gap_Pct'] = (df_final['REER_10Y_Mean'] - df_final['REER']) / df_final['REER'] * 100
-df_final['Valuation_Gap_Annual'] = df_final['Valuation_Gap_Pct'] / 10
+
+if REVERSION_MODE == 'half_life':
+    # Exponential decay: fraction closed = 1 - exp(-ln(2)/half_life * horizon)
+    decay_rate = np.log(2) / REVERSION_HALF_LIFE
+    fraction_closed = 1 - np.exp(-decay_rate * REVERSION_HORIZON)
+    df_final['Valuation_Gap_Annual'] = df_final['Valuation_Gap_Pct'] * fraction_closed / REVERSION_HORIZON
+else:
+    # Linear: 100% reversion over horizon
+    fraction_closed = 1.0
+    df_final['Valuation_Gap_Annual'] = df_final['Valuation_Gap_Pct'] / REVERSION_HORIZON
 
 # Component 3: EM Structural Kicker (Balassa-Samuelson effect)
 df_final['EM_Kicker_Annual'] = df_final['Country'].map(lambda x: EM_KICKERS.get(x, 0.0))
@@ -1100,6 +1115,89 @@ plt.tight_layout()
 plt.subplots_adjust(bottom=0.15)
 plt.show()
 
+# Plot 7b: Expected Currency Returns Decomposition Tree (Branching Diagram)
+ret_row = df_final[df_final['Country'] == RETURNS_TREE_COUNTRY]
+if not ret_row.empty and RETURNS_TREE_COUNTRY != 'USA':
+    rr = ret_row.iloc[0]
+    total_return = rr['Expected_Annual_Return']
+    real_carry = rr['Real_Carry_Annual']
+    val_annual = rr['Valuation_Gap_Annual']
+    em_kicker = rr['EM_Kicker_Annual']
+    nom_diff = rr['Bond_10Y'] - usd_bond_10y
+    infl_diff = -(rr['BEI'] - usd_bei)
+    gap_pct = rr['Valuation_Gap_Pct']
+
+    fig7b, ax7b = plt.subplots(figsize=(14, 8))
+    ax7b.set_xlim(0, 10)
+    ax7b.set_ylim(0, 10)
+    ax7b.axis('off')
+
+    node_w, node_h = 2.2, 1.1
+
+    # 3-level layout: root → 3 children → 2+2 leaves (carry & valuation split)
+    nodes = {
+        'root':      (1.1, 5.0),
+        'carry':     (4.5, 8.0),
+        'valuation': (4.5, 5.0),
+        'em':        (4.5, 2.0),
+        'nom_diff':  (8.2, 9.0),
+        'infl_diff': (8.2, 7.0),
+        'gap':       (8.2, 5.8),
+        'reversion': (8.2, 4.2),
+    }
+
+    reversion_label = (f'HL={REVERSION_HALF_LIFE}yr ({fraction_closed*100:.0f}%)'
+                       if REVERSION_MODE == 'half_life' else 'Linear (100%)')
+
+    node_info = {
+        'root':      ('Annual Return',     total_return, COLORS['primary']),
+        'carry':     ('Real Carry',        real_carry,   COLORS['secondary']),
+        'valuation': ('Valuation',         val_annual,   COLORS['accent']),
+        'em':        ('EM Kicker (B-S)',   em_kicker,    COLORS['currency_risk']),
+        'nom_diff':  ('Nom. Yield Diff',   nom_diff,     COLORS['term_premium']),
+        'infl_diff': ('Infl. Diff (BEI)',  infl_diff,    COLORS['inflation']),
+        'gap':       ('REER Gap',          gap_pct,      COLORS['real_rate']),
+        'reversion': (reversion_label,     fraction_closed * 100, COLORS['neutral']),
+    }
+
+    edges = [
+        ('root', 'carry'), ('root', 'valuation'), ('root', 'em'),
+        ('carry', 'nom_diff'), ('carry', 'infl_diff'),
+        ('valuation', 'gap'), ('valuation', 'reversion'),
+    ]
+
+    for parent, child in edges:
+        px, py = nodes[parent]
+        cx, cy = nodes[child]
+        ax7b.annotate('',
+            xy=(cx - node_w / 2, cy), xytext=(px + node_w / 2, py),
+            arrowprops=dict(arrowstyle='->', color='#888888', lw=1.8,
+                            connectionstyle='arc3,rad=0.0'))
+
+    for key, (cx, cy) in nodes.items():
+        label, value, color = node_info[key]
+        box = FancyBboxPatch((cx - node_w / 2, cy - node_h / 2), node_w, node_h,
+                             boxstyle='round,pad=0.15', facecolor=color,
+                             edgecolor='white', linewidth=2)
+        ax7b.add_patch(box)
+        ax7b.text(cx, cy + 0.15, label, ha='center', va='center',
+                  fontsize=11, fontweight='bold', color='white')
+        fmt = f'{value:+.2f}%' if key != 'reversion' else f'{value:.0f}%'
+        ax7b.text(cx, cy - 0.25, fmt, ha='center', va='center',
+                  fontsize=13, fontweight='bold', color='white')
+
+    ax7b.set_title(f'Expected Annual Currency Return Decomposition — {RETURNS_TREE_COUNTRY} vs USD',
+                   fontsize=14, fontweight='bold', pad=15)
+
+    fig7b.text(0.5, 0.04,
+        f'Annual Return ({total_return:+.2f}%) = Real Carry ({real_carry:+.2f}%) '
+        f'+ Valuation ({val_annual:+.2f}%) + EM Kicker ({em_kicker:+.2f}%)',
+        ha='center', fontsize=10, style='italic', color='#555555')
+    add_footnote(fig7b, y_pos=0.01)
+    plt.tight_layout()
+    plt.subplots_adjust(bottom=0.12)
+    plt.show()
+
 # Plot 8: LTCMA Yield Decomposition (JP Morgan Style)
 fig8, ax8 = plt.subplots(figsize=(12, 6))
 df_ltcma = df_final.dropna(subset=['Bond_10Y', 'R_Star', 'CB_Inflation_Target']).sort_values('Bond_10Y')
@@ -1398,7 +1496,7 @@ if REER_BREAK_INFO and os.path.exists(REER_HIST_CSV):
         for country in countries_with_breaks:
             bi = REER_BREAK_INFO[country]
             n_brk = len(bi.get('break_dates', []))
-            last_brk = bi.get('break_dates', [None])[-1]
+            last_brk = (bi.get('break_dates') or [None])[-1]
             last_brk_str = last_brk.strftime('%Y-%m') if last_brk else 'N/A'
             regime_mo = bi.get('regime_months', 0)
             full_m = bi.get('full_mean', np.nan)
@@ -1436,9 +1534,40 @@ for _, row in df_final.iterrows():
           f"{row['Expected_10Y_Return_Geometric']:>+10.1f}")
 
 print("=" * 140)
+reversion_desc = (f"half-life={REVERSION_HALF_LIFE}yr, {fraction_closed*100:.0f}% closure over {REVERSION_HORIZON}yr" 
+                  if REVERSION_MODE == 'half_life' else f"linear 100% over {REVERSION_HORIZON}yr")
 print("Notes: Real10Y = Nominal 10Y - BEI | RealCarry = Real yield differential vs USD | Geom10Y = (1+r)^10-1")
-print("       Gap% = REER mean reversion | EM Kicker = Balassa-Samuelson (INR +1.5%, CNY +1.0%, ZAR +0.25%, MXN +0.5%/yr)")
+print(f"       Gap% = REER mean reversion ({reversion_desc}) | EM Kicker = Balassa-Samuelson")
 print("=" * 140)
+
+# Sensitivity Table: Expected Annual Returns under different half-life assumptions
+sensitivity_half_lives = [3, 5, 7]
+print("\n" + "=" * 100)
+print("MEAN REVERSION SENSITIVITY: Expected Annual Returns by Half-Life Assumption")
+print("=" * 100)
+header_hl = "  ".join([f"HL={hl}yr ({(1 - np.exp(-np.log(2)/hl * REVERSION_HORIZON))*100:.0f}%)" for hl in sensitivity_half_lives])
+print(f"{'Currency':<8} {'Gap%':>7} | {header_hl}  |  {'Linear':>8}")
+print("-" * 100)
+
+for _, row in df_final.iterrows():
+    if row['Country'] == 'USA':
+        continue
+    gap = row['Valuation_Gap_Pct']
+    carry = row['Real_Carry_Annual']
+    em = row['EM_Kicker_Annual']
+    vals = []
+    for hl in sensitivity_half_lives:
+        frac = 1 - np.exp(-np.log(2) / hl * REVERSION_HORIZON)
+        val_annual = gap * frac / REVERSION_HORIZON
+        total = carry + val_annual + em
+        vals.append(f"{total:>+8.2f}")
+    linear_total = carry + gap / REVERSION_HORIZON + em
+    print(f"{row['Country']:<8} {gap:>+7.1f} | {'  '.join(vals)}  |  {linear_total:>+8.2f}")
+
+print("=" * 100)
+print(f"Notes: Active mode = {REVERSION_MODE} | Gap% = (REER_mean - REER_current) / REER_current")
+print(f"       HL=Nyr means {REVERSION_HORIZON}yr gap closure: 3yr->90%, 5yr->75%, 7yr->63% | Linear = 100%")
+print("=" * 100)
 
 # ============================================================================
 # LTCMA YIELD DECOMPOSITION SUMMARY
